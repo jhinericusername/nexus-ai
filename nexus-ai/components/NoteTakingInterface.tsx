@@ -247,31 +247,32 @@ export default function NoteTakingInterface({ initialNotes = [] }: NoteTakingInt
         </div>
 
         {/* Canvas and Text Boxes Container */}
-        <div className="mt-16 h-[calc(100%-4rem)] relative bg-white rounded-lg shadow-sm">
+      {/* Canvas Container - Takes full height minus toolbar */}
+      <div className="absolute inset-0 mt-[53px]"> {/* Fixed height offset for toolbar */}
         <DrawingCanvas
-  color={currentColor}
-  brushSize={brushSize}
-  isDrawingMode={isDrawingMode}
-  tool={tool}
-  ref={canvasRef}
-/>
-          
-          {/* Text Boxes Layer */}
-          <div className="absolute inset-0 pointer-events-none">
-            {textBoxes.map(textBox => (
-              <div key={textBox.id} className="pointer-events-auto">
-                <DraggableTextBox
-                  textBox={textBox}
-                  onUpdate={updateTextBox}
-                  onDelete={deleteTextBox}
-                  isActive={textBox.id === activeTextBoxId}
-                  onFocus={() => setActiveTextBoxId(textBox.id)}
-                />
-              </div>
-            ))}
-          </div>
+          color={currentColor}
+          brushSize={brushSize}
+          isDrawingMode={isDrawingMode}
+          tool={tool}
+          ref={canvasRef}
+        />
+        
+        {/* Text Boxes Layer */}
+        <div className="absolute inset-0 pointer-events-none">
+          {textBoxes.map(textBox => (
+            <div key={textBox.id} className="pointer-events-auto">
+              <DraggableTextBox
+                textBox={textBox}
+                onUpdate={updateTextBox}
+                onDelete={deleteTextBox}
+                isActive={textBox.id === activeTextBoxId}
+                onFocus={() => setActiveTextBoxId(textBox.id)}
+              />
+            </div>
+          ))}
         </div>
       </div>
+    </div>
 
       {/* AI Chat Interface (25%) */}
       <Card className="w-1/4 h-full border-l bg-white">

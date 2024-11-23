@@ -1,62 +1,76 @@
 // components/DrawingCanvas.tsx
 'use client'
 
-import React, { useEffect, useState, forwardRef, ForwardedRef } from 'react'
-import type { Point, DrawingAction } from '../types/canvas'
+import React, { useEffect, useState, forwardRef, useCallback } from 'react'
+
+interface Point {
+  x: number
+  y: number
+}
 
 interface DrawingCanvasProps {
   color: string
   brushSize: number
   isDrawingMode: boolean
   tool: 'pen' | 'eraser' | 'rectangle' | 'circle' | 'line'
-  onUndo?: () => void
-  onRedo?: () => void
 }
 
 const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
-  ({ color, brushSize, isDrawingMode, tool, onUndo, onRedo }, ref) => {
+  ({ color, brushSize, isDrawingMode, tool }, ref) => {
     const [isDrawing, setIsDrawing] = useState(false)
     const [startPoint, setStartPoint] = useState<Point | null>(null)
     const contextRef = React.useRef<CanvasRenderingContext2D | null>(null)
     const [history, setHistory] = useState<ImageData[]>([])
-    const [redoStack, setRedoStack] = useState<ImageData[]>([])
-    const currentPathRef = React.useRef<Point[]>([])
-    const tempCanvasRef = React.useRef<HTMLCanvasElement | null>(null)
+    const lastPoint = React.useRef<Point | null>(null)
 
-    useEffect(() => {
+    const initializeCanvas = useCallback(() => {
       const canvas = ref instanceof Function ? null : ref?.current
       if (!canvas) return
 
-      // Set up main canvas
+      const container = canvas.parentElement
+      if (!container) return
+
+      // Set canvas size
+      const rect = container.getBoundingClientRect()
+      canvas.style.width = `${rect.width}px`
+      canvas.style.height = `${rect.height}px`
+      canvas.width = rect.width
+      canvas.height = rect.height
+
       const context = canvas.getContext('2d', { willReadFrequently: true })
       if (!context) return
 
-      // Set up canvas dimensions
-      const dpr = window.devicePixelRatio || 1
-      const rect = canvas.getBoundingClientRect()
-      
-      canvas.width = rect.width * dpr
-      canvas.height = rect.height * dpr
-      canvas.style.width = `${rect.width}px`
-      canvas.style.height = `${rect.height}px`
-      
-      context.scale(dpr, dpr)
+      // Configure context
       context.lineCap = 'round'
       context.lineJoin = 'round'
-      context.strokeStyle = color
+      context.strokeStyle = tool === 'eraser' ? '#ffffff' : color
       context.lineWidth = brushSize
       contextRef.current = context
 
-      // Set up temporary canvas for shape preview
-      const tempCanvas = document.createElement('canvas')
-      tempCanvas.width = canvas.width
-      tempCanvas.height = canvas.height
-      tempCanvasRef.current = tempCanvas
+      // Initialize with white background if no history
+      if (history.length === 0) {
+        context.fillStyle = '#ffffff'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        saveState()
+      } else {
+        // Restore last state
+        const lastState = history[history.length - 1]
+        context.putImageData(lastState, 0, 0)
+      }
+    }, [ref, color, brushSize, tool, history])
 
-      // Save initial state
-      const initialState = context.getImageData(0, 0, canvas.width, canvas.height)
-      setHistory([initialState])
-    }, [ref, color, brushSize])
+    useEffect(() => {
+      initializeCanvas()
+      window.addEventListener('resize', initializeCanvas)
+      return () => window.removeEventListener('resize', initializeCanvas)
+    }, [initializeCanvas])
+
+    useEffect(() => {
+      if (contextRef.current) {
+        contextRef.current.strokeStyle = tool === 'eraser' ? '#ffffff' : color
+        contextRef.current.lineWidth = brushSize
+      }
+    }, [color, brushSize, tool])
 
     const saveState = () => {
       const canvas = ref instanceof Function ? null : ref?.current
@@ -64,13 +78,31 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
 
       const currentState = contextRef.current.getImageData(0, 0, canvas.width, canvas.height)
       setHistory(prev => [...prev, currentState])
-      setRedoStack([]) // Clear redo stack on new action
     }
 
-    const drawShape = (start: Point, end: Point, context: CanvasRenderingContext2D, preview = false) => {
+    const getPoint = (e: React.PointerEvent): Point => {
+      const canvas = ref instanceof Function ? null : ref?.current
+      if (!canvas) return { x: 0, y: 0 }
+
+      const rect = canvas.getBoundingClientRect()
+      return {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      }
+    }
+
+    const drawShape = (start: Point, end: Point, isPreview = false) => {
+      if (!contextRef.current) return
+
+      const context = contextRef.current
+
+      // If preview, restore previous state first
+      if (isPreview && history.length > 0) {
+        context.putImageData(history[history.length - 1], 0, 0)
+      }
+
       context.beginPath()
       context.strokeStyle = tool === 'eraser' ? '#ffffff' : color
-      context.lineWidth = brushSize
 
       switch (tool) {
         case 'rectangle':
@@ -94,103 +126,78 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
       }
       
       context.stroke()
-      if (!preview) saveState()
+
+      if (!isPreview) {
+        saveState()
+      }
     }
 
     const startDrawing = (e: React.PointerEvent) => {
-      if (!isDrawingMode) return
+      if (!isDrawingMode || !contextRef.current) return
 
-      const canvas = ref instanceof Function ? null : ref?.current
-      if (!canvas || !contextRef.current) return
-
-      const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-
+      e.preventDefault()
+      const point = getPoint(e)
       setIsDrawing(true)
-      setStartPoint({ x, y })
-      currentPathRef.current = [{ x, y }]
+      setStartPoint(point)
+      lastPoint.current = point
 
       if (tool === 'pen' || tool === 'eraser') {
         contextRef.current.beginPath()
-        contextRef.current.moveTo(x, y)
+        contextRef.current.moveTo(point.x, point.y)
       }
     }
 
     const draw = (e: React.PointerEvent) => {
-      if (!isDrawing || !isDrawingMode || !startPoint) return
+      if (!isDrawing || !isDrawingMode || !contextRef.current || !lastPoint.current) return
 
-      const canvas = ref instanceof Function ? null : ref?.current
-      if (!canvas || !contextRef.current) return
+      e.preventDefault()
+      const point = getPoint(e)
 
-      const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-      
       if (tool === 'pen' || tool === 'eraser') {
-        contextRef.current.lineTo(x, y)
+        contextRef.current.beginPath()
+        contextRef.current.moveTo(lastPoint.current.x, lastPoint.current.y)
+        contextRef.current.lineTo(point.x, point.y)
         contextRef.current.stroke()
-        currentPathRef.current.push({ x, y })
+        lastPoint.current = point
       } else {
-        // Preview shape on temporary canvas
-        const tempCanvas = tempCanvasRef.current
-        if (!tempCanvas) return
-
-        const tempContext = tempCanvas.getContext('2d')
-        if (!tempContext) return
-
-        // Clear temp canvas and copy current state
-        tempContext.clearRect(0, 0, tempCanvas.width, tempCanvas.height)
-        tempContext.putImageData(history[history.length - 1], 0, 0)
-
-        // Draw shape preview
-        drawShape(startPoint, { x, y }, tempContext, true)
-        
-        // Copy temp canvas to main canvas
-        contextRef.current.clearRect(0, 0, canvas.width, canvas.height)
-        contextRef.current.drawImage(tempCanvas, 0, 0)
+        drawShape(startPoint!, point, true)
       }
     }
 
     const stopDrawing = (e: React.PointerEvent) => {
-      if (!isDrawing || !startPoint) return
+      if (!isDrawing) return
 
-      const canvas = ref instanceof Function ? null : ref?.current
-      if (!canvas || !contextRef.current) return
-
-      const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
-
-      if (tool !== 'pen' && tool !== 'eraser') {
-        drawShape(startPoint, { x, y }, contextRef.current)
-      } else if (currentPathRef.current.length > 1) {
+      if (tool !== 'pen' && tool !== 'eraser' && startPoint) {
+        const point = getPoint(e)
+        drawShape(startPoint, point)
+      } else {
         saveState()
       }
 
       setIsDrawing(false)
       setStartPoint(null)
-      currentPathRef.current = []
+      lastPoint.current = null
     }
 
     return (
       <canvas
         ref={ref}
-        className="absolute inset-0 z-10 cursor-crosshair touch-none"
+        className="absolute inset-0 w-full h-full touch-none"
         style={{ 
           opacity: isDrawingMode ? 1 : 0.5,
-          cursor: tool === 'eraser' ? 'cell' : 'crosshair'
+          cursor: tool === 'eraser' ? 'cell' : 'crosshair',
+          backgroundColor: 'white'
         }}
         onPointerDown={startDrawing}
         onPointerMove={draw}
         onPointerUp={stopDrawing}
         onPointerLeave={stopDrawing}
+        onPointerCancel={stopDrawing}
       />
     )
   }
 )
 
-// Always add a display name for forwardRef components
 DrawingCanvas.displayName = 'DrawingCanvas'
 
 export default DrawingCanvas
