@@ -82,6 +82,46 @@ export default function NoteTakingInterface({ noteId = uuidv4() }: NoteTakingInt
     { icon: Minus, name: 'line' as Tool, tooltip: 'Line (L)' },
   ]
 
+
+  const [question, setQuestion] = useState<string>(''); // State for user input question
+const [chatHistory, setChatHistory] = useState<{ type: 'user' | 'ai', content: string }[]>([]); // Chat messages
+const [isFetchingAnswer, setIsFetchingAnswer] = useState<boolean>(false); // Loading state for API call
+
+const handleSendQuestion = async () => {
+  if (!question.trim()) return;
+
+  setChatHistory(prev => [...prev, { type: 'user', content: question }]); // Add user question to chat
+  setQuestion(''); // Clear input
+  setIsFetchingAnswer(true);
+
+  try {
+    // Replace with your Flask API endpoint
+    const response = await fetch('http://127.0.0.1:5000/answer-question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        table_name: 'notes', // Table name in Supabase
+        file_column: 'file_url', // Column containing the document URL
+        document_id: noteId, // Pass the noteId
+        question,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch the AI response');
+    }
+
+    const data = await response.json();
+    setChatHistory(prev => [...prev, { type: 'ai', content: data.answer }]); // Add AI answer to chat
+  } catch (error) {
+    console.error('Error fetching AI response:', error);
+    setChatHistory(prev => [...prev, { type: 'ai', content: 'Sorry, I could not process your question.' }]);
+  } finally {
+    setIsFetchingAnswer(false);
+  }
+};
+
+
   // Recording keystrokes
   useEffect(() => {
     if (isRecording) {
@@ -475,54 +515,63 @@ export default function NoteTakingInterface({ noteId = uuidv4() }: NoteTakingInt
 
       {/* AI Chat Interface (25%) */}
       <Card className="w-1/4 h-full border-l bg-white">
-        <div className="flex flex-col h-full">
-          <div className="p-4 border-b">
-            <h2 className="font-semibold text-lg">AI Assistant</h2>
-            <p className="text-sm text-gray-500">
-              {isRecording 
-                ? "Recording in progress - Ask questions about your notes"
-                : "Ask questions about your notes"}
-            </p>
-          </div>
+  <div className="flex flex-col h-full">
+    <div className="p-4 border-b">
+      <h2 className="font-semibold text-lg">AI Assistant</h2>
+      <p className="text-sm text-gray-500">
+        {isRecording
+          ? "Recording in progress - Ask questions about your notes"
+          : "Ask questions about your notes"}
+      </p>
+    </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="space-y-4">
-              <div className="bg-blue-50 rounded-lg p-3 text-sm">
-                {isRecording ? (
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-                    <span>Recording in progress - capturing audio, drawings, and text...</span>
-                  </div>
-                ) : (
-                  "I can help you understand and organize your notes. Try asking me a question!"
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 border-t">
-            <div className="flex gap-2">
-              <Input
-                type="text"
-                placeholder="Ask a question..."
-                className="flex-1"
-                disabled={isRecording}
-              />
-              <Button 
-                size="sm"
-                disabled={isRecording}
-              >
-                Send
-              </Button>
-            </div>
-            {isRecording && (
-              <p className="text-xs text-gray-500 mt-2">
-                Chat is disabled during recording to prevent audio interference
-              </p>
-            )}
-          </div>
+    {/* Chat Display */}
+    <div className="flex-1 overflow-y-auto p-4">
+      {chatHistory.map((message, index) => (
+        <div
+          key={index}
+          className={`rounded-lg p-3 text-sm ${
+            message.type === 'user' ? 'bg-gray-100 self-end' : 'bg-blue-50'
+          }`}
+        >
+          {message.content}
         </div>
-      </Card>
+      ))}
+      {isFetchingAnswer && (
+        <div className="bg-blue-50 rounded-lg p-3 text-sm animate-pulse">
+          Fetching response...
+        </div>
+      )}
+    </div>
+
+    {/* Input Section */}
+    <div className="p-4 border-t">
+      <div className="flex gap-2">
+        <Input
+          type="text"
+          placeholder="Ask a question..."
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          className="flex-1"
+          disabled={isRecording || isFetchingAnswer}
+        />
+        <Button
+          size="sm"
+          onClick={handleSendQuestion}
+          disabled={isRecording || isFetchingAnswer}
+        >
+          Send
+        </Button>
+      </div>
+      {isRecording && (
+        <p className="text-xs text-gray-500 mt-2">
+          Chat is disabled during recording to prevent audio interference.
+        </p>
+      )}
+    </div>
+  </div>
+</Card>
+
 
       {/* Keyboard Shortcuts Help */}
       <div className="fixed bottom-4 right-4 text-xs text-gray-500">
