@@ -6,6 +6,17 @@ import React, { useEffect, useState, forwardRef, useCallback } from 'react'
 interface Point {
   x: number
   y: number
+  timestamp: number
+  pressure: number
+}
+
+interface Stroke {
+  id: string
+  type: 'pen' | 'eraser' | 'rectangle' | 'circle' | 'line'
+  points: Point[]
+  color: string
+  brushSize: number
+  timestamp: number
 }
 
 interface DrawingCanvasProps {
@@ -13,15 +24,18 @@ interface DrawingCanvasProps {
   brushSize: number
   isDrawingMode: boolean
   tool: 'pen' | 'eraser' | 'rectangle' | 'circle' | 'line'
+  isRecording?: boolean
+  onStroke?: (stroke: Stroke) => void
 }
 
 const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
-  ({ color, brushSize, isDrawingMode, tool }, ref) => {
+  ({ color, brushSize, isDrawingMode, tool, isRecording, onStroke }, ref) => {
     const [isDrawing, setIsDrawing] = useState(false)
     const [startPoint, setStartPoint] = useState<Point | null>(null)
     const contextRef = React.useRef<CanvasRenderingContext2D | null>(null)
     const [history, setHistory] = useState<ImageData[]>([])
     const lastPoint = React.useRef<Point | null>(null)
+    const currentStroke = React.useRef<Stroke | null>(null)
 
     const initializeCanvas = useCallback(() => {
       const canvas = ref instanceof Function ? null : ref?.current
@@ -82,12 +96,14 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
 
     const getPoint = (e: React.PointerEvent): Point => {
       const canvas = ref instanceof Function ? null : ref?.current
-      if (!canvas) return { x: 0, y: 0 }
+      if (!canvas) return { x: 0, y: 0, timestamp: Date.now(), pressure: e.pressure || 0.5 }
 
       const rect = canvas.getBoundingClientRect()
       return {
         x: e.clientX - rect.left,
-        y: e.clientY - rect.top
+        y: e.clientY - rect.top,
+        timestamp: Date.now(),
+        pressure: e.pressure || 0.5
       }
     }
 
@@ -129,6 +145,14 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
 
       if (!isPreview) {
         saveState()
+        // Record the completed shape if recording
+        if (isRecording && onStroke && currentStroke.current) {
+          const finalStroke = {
+            ...currentStroke.current,
+            points: [start, end]
+          }
+          onStroke(finalStroke)
+        }
       }
     }
 
@@ -140,6 +164,16 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
       setIsDrawing(true)
       setStartPoint(point)
       lastPoint.current = point
+
+      // Initialize new stroke
+      currentStroke.current = {
+        id: crypto.randomUUID(),
+        type: tool,
+        points: [point],
+        color,
+        brushSize,
+        timestamp: Date.now()
+      }
 
       if (tool === 'pen' || tool === 'eraser') {
         contextRef.current.beginPath()
@@ -158,6 +192,12 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
         contextRef.current.moveTo(lastPoint.current.x, lastPoint.current.y)
         contextRef.current.lineTo(point.x, point.y)
         contextRef.current.stroke()
+
+        // Add point to current stroke
+        if (currentStroke.current) {
+          currentStroke.current.points.push(point)
+        }
+
         lastPoint.current = point
       } else {
         drawShape(startPoint!, point, true)
@@ -172,11 +212,16 @@ const DrawingCanvas = forwardRef<HTMLCanvasElement, DrawingCanvasProps>(
         drawShape(startPoint, point)
       } else {
         saveState()
+        // Record the completed stroke if recording
+        if (isRecording && onStroke && currentStroke.current) {
+          onStroke(currentStroke.current)
+        }
       }
 
       setIsDrawing(false)
       setStartPoint(null)
       lastPoint.current = null
+      currentStroke.current = null
     }
 
     return (

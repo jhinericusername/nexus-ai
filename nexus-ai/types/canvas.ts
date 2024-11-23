@@ -19,4 +19,5 @@ export interface Point {
     height: number
     content: string
     isDragging: boolean
+    timestamp: number
   }
